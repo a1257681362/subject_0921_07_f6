@@ -53,9 +53,28 @@ photo:
   # 单张大小上限（字节），与 multipart 限制一致
   max-file-size: 20971520
 
+# 无状态会话：JWT 双令牌（access 短期访问 + refresh 一次性轮换），登出走黑名单
+auth:
+  # 鉴权总开关。生产保持 true；测试环境 application-test.yml 中置 false 放行既有业务用例。
+  enabled: true
+  # 起步阶段内置登录账号（接入用户表后可移除）。生产务必用环境变量覆盖密码。
+  accounts:
+    - username: ${AUTH_USERNAME:bootstrap}
+      password: ${AUTH_PASSWORD:bootstrap123}
+      roles: system
+  jwt:
+    # HMAC 签名密钥（Base64 编码，至少 32 字节明文）。生产必须通过环境变量 AUTH_JWT_SECRET 覆盖，
+    # 切勿使用下面的开发默认值上线；轮换密钥会使旧令牌全部失效，需重新登录。
+    secret: ${AUTH_JWT_SECRET:ZGV2LW9ubHktZXZvcHMtand0LXNlY3JldC1rZXktMzJieXRlcyE=}
+    # 访问令牌有效期（分钟）：短期，默认 2 小时
+    access-ttl-minutes: 120
+    # 刷新令牌有效期（小时）：长期，默认 7 天
+    refresh-ttl-hours: 168
+    # 黑名单清理：每 10 分钟扫描一次，删除已过期的登记（过期令牌本身就会被拒，登记无需保留）
+    blacklist-cleanup-cron: "0 */10 * * * ?"
+
 # 卫星轨迹账每日勾稽配置
-reconcile:
-  # 定时调度开关（测试环境关闭，手工/用例直接调服务触发）
+reconcile:  # 定时调度开关（测试环境关闭，手工/用例直接调服务触发）
   scheduling-enabled: true
   # 每天凌晨 02:10 跑前一日的勾稽（避开整点高峰）
   cron: "0 10 2 * * ?"

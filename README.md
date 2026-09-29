@@ -139,3 +139,23 @@
 - 配置：`photo.root-dir`（默认 `./data/photos`）、`photo.thumb-max-side`（默认 300）、`photo.allowed-types`、`photo.max-file-size`。
 
 新增表：`t_work_order_photo`。上线操作流（备份→变更→验证）：[docs/work-order-photo-runbook.md](docs/work-order-photo-runbook.md)。
+
+## F6 无状态会话（JWT 双令牌）
+
+会话管理无状态化：**JWT 签发与校验进 Shiro 过滤链**，服务端不保存 HttpSession，只保留两份轻量表。
+
+- **双令牌**：`accessToken`（访问令牌，默认 2 小时）办业务；`refreshToken`（刷新令牌，默认 7 天）只用来换新。令牌 claims 只有 sub（用户名）/jti/typ/roles/iat/exp，**不含密码等敏感明文**。
+- **刷新即轮换、刷新令牌一次性**：换新时旧刷新令牌 `ACTIVE→USED` 条件更新原子翻转（并发/重放第二笔必失败），同时签发全新的 access+refresh 一对；旧刷新令牌再用即拒。
+- **登出走黑名单**：登出的访问令牌按 jti 登记 `t_token_blacklist` 到自然过期，过滤链命中即 401；刷新令牌置 `REVOKED`。
+- **过期自动清理**：黑名单与过期刷新令牌登记由定时任务（默认每 10 分钟）自动删除，过期令牌本身在校验环节就会被拒。
+- **Shiro 过滤链**：`/api/auth/login`、`/api/auth/refresh`、`/api/health` 放行（anon），其余业务接口一律走 `jwt` 过滤器（验签→验期→类型必须 ACCESS→查黑名单→JwtRealm 建登录态）；无状态 SecurityManager 关闭会话创建。鉴权失败统一 HTTP 401 + `{success:false,message}`。
+- 账号密码走 Shiro `SimpleAccountRealm`（起步内置账号，`auth.accounts` 配置，生产用 `AUTH_USERNAME`/`AUTH_PASSWORD` 覆盖）；签名密钥 HS256，`AUTH_JWT_SECRET`（Base64、≥32 字节）配置。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/login` | 账号密码登录，返回双令牌（anon） |
+| POST | `/api/auth/refresh` | 刷新令牌换新对（一次性轮换）（anon） |
+| POST | `/api/auth/logout` | 登出：access 进黑名单、refresh 吊销（需带 access） |
+| GET | `/api/health` | 健康检查（anon） |
+
+新增表：`t_refresh_token`、`t_token_blacklist`。机手操作指引（贴工位）：[docs/auth-guide.md](docs/auth-guide.md)；上线 Runbook：[docs/auth-runbook.md](docs/auth-runbook.md)。
