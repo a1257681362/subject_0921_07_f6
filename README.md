@@ -139,3 +139,36 @@
 - 配置：`photo.root-dir`（默认 `./data/photos`）、`photo.thumb-max-side`（默认 300）、`photo.allowed-types`、`photo.max-file-size`。
 
 新增表：`t_work_order_photo`。上线操作流（备份→变更→验证）：[docs/work-order-photo-runbook.md](docs/work-order-photo-runbook.md)。
+
+## F6 无状态会话（JWT 双令牌）
+
+会话管理改为无状态：JWT 签发与校验进 Shiro 过滤链，服务端不保存登录会话（无 HttpSession、无任何 Cookie）。
+
+- **双令牌**：`POST /api/auth/login` 登录后下发访问令牌（默认 30 分钟，业务接口 `Authorization: Bearer` 携带）
+  与刷新令牌（默认 7 天，只对 `/api/auth/refresh` 使用）。
+- **刷新即轮换（一次性）**：刷新时旧刷新令牌立即置 `ROTATED` 并指向新令牌；并发两笔刷新由台账乐观锁 +
+  jti 唯一约束兜底，只有一笔成功。已轮换/已吊销的刷新令牌再次出现判**重放**，同会话整条连带吊销
+  （在途访问令牌也立即 401）。
+- **登出走黑名单**：访问令牌按 jti 登记 `t_token_blacklist`（保留到令牌自身 exp），再用即 401。
+- **到期自动清理**：Quartz 每日 03:30 物理清理过期黑名单与过期刷新令牌台账（`auth.jwt.cleanup-cron`）。
+- **令牌不带敏感明文**：载荷仅 `uid/sid/jti/typ/iss/iat/nbf/exp`；用户信息由服务端按 uid 现查。
+  口令按 16 字节随机盐 + SHA-256 迭代 1024 轮存储，库内无明文；改密即吊销全部会话。
+- 审计列联动：业务写入的 `create_by/update_by` 自动取当前 JWT 用户 ID；定时任务等无登录上下文时回落 system(0)。
+- 应急开关：`auth.jwt.filter-enabled=false` 可临时全放行（仅限排障，生产必须 true）。
+
+认证接口 `/api/auth`：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/login` | 用户名密码登录，返回双令牌（username、password） |
+| POST | `/api/auth/refresh` | 刷新令牌一次性轮换，返回新双令牌（refreshToken） |
+| POST | `/api/auth/logout` | 登出：访问令牌入黑名单，刷新令牌一并吊销（refreshToken 可选） |
+| GET | `/api/auth/me` | 当前登录人（服务端按 uid 现查） |
+| POST | `/api/auth/change-password` | 修改密码（oldPassword、newPassword≥8 位），改完全部会话失效 |
+
+其余 `/api/**` 业务接口（除 `/api/health`）一律要求有效访问令牌，无/失效令牌返回 HTTP 401。
+首启引导账号 `admin/admin123`（仅不存在时写入，**上线必须立即改密**）；
+生产必须配置固定签名密钥 `AUTH_JWT_SECRET`（`openssl rand -base64 32`）。
+
+新增表：`t_sys_user`、`t_refresh_token`、`t_token_blacklist`。
+机手操作指引与上线/应急手册（备份→变更→验证→回滚）：[docs/auth-jwt-runbook.md](docs/auth-jwt-runbook.md)。

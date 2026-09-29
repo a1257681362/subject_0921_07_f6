@@ -1,15 +1,16 @@
 package com.evops.config;
 
-import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
+import com.evops.auth.AuthPrincipal;
 import org.apache.ibatis.reflection.MetaObject;
+import org.apache.shiro.SecurityUtils;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
 /**
- * 审计字段自动填充。当前还没有真实用户体系，操作人统一记 0（system）；
- * 接入登录后从登录上下文取用户 ID 即可。
+ * 审计字段自动填充。优先从 Shiro 当前主体取登录用户 ID（JWT 无状态请求）；
+ * 取不到（定时任务、启动补跑、登录前的请求等）回落 system=0。
  */
 @Component
 public class AuditMetaObjectHandler implements MetaObjectHandler {
@@ -18,17 +19,30 @@ public class AuditMetaObjectHandler implements MetaObjectHandler {
 
     @Override
     public void insertFill(MetaObject metaObject) {
+        Long userId = currentUserId();
         LocalDateTime now = LocalDateTime.now();
         fillIfPresent("createTime", now, metaObject);
         fillIfPresent("updateTime", now, metaObject);
-        fillIfPresent("createBy", SYSTEM_USER, metaObject);
-        fillIfPresent("updateBy", SYSTEM_USER, metaObject);
+        fillIfPresent("createBy", userId, metaObject);
+        fillIfPresent("updateBy", userId, metaObject);
     }
 
     @Override
     public void updateFill(MetaObject metaObject) {
         fillIfPresent("updateTime", LocalDateTime.now(), metaObject);
-        fillIfPresent("updateBy", SYSTEM_USER, metaObject);
+        fillIfPresent("updateBy", currentUserId(), metaObject);
+    }
+
+    private Long currentUserId() {
+        try {
+            Object principal = SecurityUtils.getSubject().getPrincipal();
+            if (principal instanceof AuthPrincipal) {
+                return ((AuthPrincipal) principal).getUserId();
+            }
+        } catch (Exception e) {
+            // 无 Web 请求上下文（调度线程等）：回落 system
+        }
+        return SYSTEM_USER;
     }
 
     private void fillIfPresent(String field, Object value, MetaObject metaObject) {

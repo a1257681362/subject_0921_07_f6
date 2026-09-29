@@ -42,6 +42,22 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 
+# F6 无状态会话（JWT 双令牌）
+auth:
+  jwt:
+    # 生产必填：Base64 的 HS256 密钥（>=32 字节），用 openssl rand -base64 32 生成后设到环境变量；
+    # 留空时每次启动随机生成，重启后所有令牌失效（仅适合本机开发）
+    secret: ${AUTH_JWT_SECRET:}
+    # 访问令牌 30 分钟；刷新令牌 7 天（每次刷新顺延一个完整周期）
+    access-token-ttl-minutes: 30
+    refresh-token-ttl-days: 7
+    # 鉴权过滤链总开关；false=全部放行，仅限排障，生产必须 true
+    filter-enabled: true
+    # 黑名单/过期刷新令牌每日清理调度
+    scheduling-enabled: true
+    # 每日 03:30 清理（避开 02:10 勾稽作业）
+    cleanup-cron: "0 30 3 * * ?"
+
 # 作业单现场照片
 photo:
   # 存储根目录：original/ 存原图（永不覆盖），thumb/ 存缩略图（独立目录）

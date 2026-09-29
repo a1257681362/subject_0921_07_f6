@@ -21,3 +21,9 @@ photo:
   thumb-max-side: 300
   allowed-types: jpg,jpeg,png
   max-file-size: 20971520
+
+auth:
+  jwt:
+    # 存量接口测试按匿名访问；鉴权专用用例用 @TestPropertySource 单独打开
+    filter-enabled: false
+    scheduling-enabled: false
